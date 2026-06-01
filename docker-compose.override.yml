@@ -1,0 +1,30 @@
+services:
+  db:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: .
+      target: builder
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    volumes:
+      - .:/app
+    environment:
+      ENV: development
+      # Tell uv to use the system Python instead of creating a .venv from the mounted host directory
+      UV_SYSTEM_PYTHON: "1"
+
+  worker:
+    volumes:
+      - .:/app
+
+  beat:
+    volumes:
+      - .:/app

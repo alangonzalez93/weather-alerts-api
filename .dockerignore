@@ -1,0 +1,23 @@
+# Git
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual environment (local macOS binaries, incompatible with container Linux)
+.venv/
+
+# Local env file — injected at runtime via docker-compose env_file
+.env
+
+# Not needed inside the image
+specs/
+tests/
+*.md
+docker-compose.override.yml
+.claude/

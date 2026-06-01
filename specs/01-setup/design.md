@@ -14,7 +14,7 @@
 | Task queue         | Celery                          | Industry standard for distributed tasks in Python |
 | Broker             | Redis                           | Low overhead, simple to operate, Celery-compatible |
 | Containerization   | Docker + Docker Compose         | Reproducible environment, one command to run everything |
-| Logging            | structlog                       | Structured logging (JSON in prod, readable in dev) |
+| Logging            | Python stdlib logging           | Standard logging with custom formatter, HealthCheckFilter, noisy logger suppression |
 
 ---
 
@@ -49,23 +49,31 @@ weather-alerts-api/
 ├── alembic/
 │   ├── env.py                  # Async Alembic configuration
 │   └── versions/
-│       └── 0001_initial.py     # Initial migration: weather_records
+│       └── 0001_initial.py     # Initial migration: weather_forecasts
 ├── app/
 │   ├── __init__.py
-│   ├── main.py                 # FastAPI app factory + routers + lifespan
-│   ├── config.py               # Settings via pydantic-settings
-│   ├── database.py             # Async engine + async session factory
-│   ├── database_sync.py        # Sync engine + sync session factory
-│   ├── celery_app.py           # Celery app + beat schedule
+│   ├── main.py                 # FastAPI app factory + lifespan
+│   ├── config/
+│   │   ├── __init__.py         # Re-exports: settings, get_settings
+│   │   ├── settings.py         # Settings class + singleton get_settings()
+│   │   └── logging.py          # setup_logging(), HealthCheckFilter
+│   ├── core/
+│   │   ├── __init__.py
+│   │   ├── database.py         # Async engine + AsyncSession factory
+│   │   ├── database_sync.py    # Sync engine + Session factory
+│   │   ├── celery_app.py       # Celery app + beat schedule
+│   │   └── exceptions.py       # Global unhandled exception handler
 │   ├── models/
-│   │   ├── __init__.py         # Enums: WeatherEventType, NotificationStatus
-│   │   └── weather_record.py
+│   │   ├── __init__.py         # Re-exports enums + imports all model classes for Alembic
+│   │   ├── enums.py            # WeatherEventType, NotificationStatus (StrEnum)
+│   │   └── weather_forecast.py
 │   ├── repositories/
 │   │   ├── __init__.py
 │   │   ├── base.py             # Generic BaseRepository[T]
-│   │   └── weather_record_repository.py
+│   │   └── weather_forecast_repository.py
 │   ├── schemas/
-│   │   └── __init__.py
+│   │   ├── __init__.py
+│   │   └── health.py           # HealthResponse Pydantic model
 │   ├── routers/
 │   │   ├── __init__.py
 │   │   └── health.py           # GET /health
@@ -82,14 +90,16 @@ weather-alerts-api/
 
 ## Repository Pattern
 
-### Base Repository
+Two base classes — one async for FastAPI, one sync for Celery workers. Concrete repositories inherit from the appropriate base.
 
-Generic base using Python 3.12 type parameters. All concrete repositories inherit from it.
+Both base classes constrain `T` via a `HasId` Protocol — any model passed must declare `id: UUID`. This lets the type checker verify `self._model.id` is valid without requiring model inheritance.
 
 ```python
-class BaseRepository[T]:
-    def __init__(self, session: AsyncSession | Session) -> None:
-        self.session = session
+class HasId(Protocol):
+    id: UUID
+
+class BaseRepository[T: HasId]:
+    def __init__(self, model: type[T], session: AsyncSession) -> None: ...
 
     async def get_by_id(self, id: UUID) -> T | None: ...
     async def create(self, instance: T) -> T: ...
@@ -97,17 +107,29 @@ class BaseRepository[T]:
     async def delete(self, instance: T) -> None: ...
 ```
 
-The same repository classes accept both `AsyncSession` (FastAPI) and `Session` (Celery) — the caller is responsible for passing the appropriate session type.
-
-### `WeatherRecordRepository`
+### `SyncBaseRepository[T: HasId]` — sync (Celery workers)
 
 ```python
-class WeatherRecordRepository(BaseRepository[WeatherRecord]):
-    async def upsert(self, record: WeatherRecord) -> WeatherRecord: ...
+class SyncBaseRepository[T: HasId]:
+    def __init__(self, model: type[T], session: Session) -> None: ...
+
+    def get_by_id(self, id: UUID) -> T | None: ...
+    def create(self, instance: T) -> T: ...
+    def update(self, instance: T) -> T: ...
+    def delete(self, instance: T) -> None: ...
+```
+
+Concrete repositories inherit from the base that matches their execution context. Both live in `app/repositories/`.
+
+### `WeatherForecastRepository`
+
+```python
+class WeatherForecastRepository(BaseRepository[WeatherForecast]):
+    async def upsert(self, record: WeatherForecast) -> WeatherForecast: ...
     async def get_by_zone_event_date_range(
         self, zone: str, event_type: WeatherEventType,
-        date_from: date, date_to: date
-    ) -> list[WeatherRecord]: ...
+        date_from: date, date_to: date,
+    ) -> list[WeatherForecast]: ...
 ```
 
 ---
@@ -128,7 +150,6 @@ dependencies = [
     "pydantic-settings",
     "celery[redis]",
     "redis",
-    "structlog",
 ]
 
 [dependency-groups]
@@ -144,10 +165,14 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I"]
+select = ["E", "F", "I", "B", "UP", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"app/routers/*.py" = ["B008"]  # FastAPI Depends() in default args is intentional
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 ```
 
 ---
@@ -159,7 +184,13 @@ asyncio_mode = "auto"
 
 # Database
 DATABASE_URL=postgresql+asyncpg://agrobot:agrobot@db:5432/weather_alerts_api
-DATABASE_URL_SYNC=postgresql+psycopg2://agrobot:agrobot@db:5432/weather_alerts_api
+# DATABASE_URL_SYNC is derived automatically from DATABASE_URL — do not set it
+
+# Pool sizing — tune per environment to stay within postgres max_connections
+# Total connections = (pool_size + max_overflow) x number_of_processes
+DB_POOL_SIZE=10
+DB_MAX_OVERFLOW=20
+DB_POOL_RECYCLE=3600
 
 # Redis / Celery
 CELERY_BROKER_URL=redis://redis:6379/0
@@ -177,7 +208,7 @@ LOG_LEVEL=INFO
 
 ---
 
-## Data Model — `weather_records`
+## Data Model — `weather_forecasts`
 
 ### Enum: `WeatherEventType` (Python `str` enum, `VARCHAR` column in DB)
 
@@ -211,7 +242,7 @@ flood        → Flood
 - UNIQUE `(zone, date, event_type)`
 
 **Indexes:**
-- `(zone, date)` — range lookup by the alert evaluator
+- `(zone, event_type, date)` — column order matches evaluator query pattern (zone → event_type → date range)
 
 ---
 
@@ -253,8 +284,8 @@ Stage 2 (runtime):
 | Service  | Command |
 |----------|---------|
 | `api`    | `alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000` |
-| `worker` | `celery -A app.celery_app worker --loglevel=info` |
-| `beat`   | `celery -A app.celery_app beat --loglevel=info` |
+| `worker` | `celery -A app.core.celery_app:celery_app worker --loglevel=info` |
+| `beat`   | `celery -A app.core.celery_app:celery_app beat --loglevel=info` |
 
 ---
 
@@ -263,8 +294,9 @@ Stage 2 (runtime):
 #### `GET /health`
 
 ```
-Response 200 → { "status": "ok", "database": "ok" }
-Response 503 → { "status": "error", "database": "unreachable" }
+Response 200 → { "status": "ok",    "database": "ok",          "redis": "ok" }
+Response 503 → { "status": "error", "database": "unreachable",  "redis": "ok" }
+Response 503 → { "status": "error", "database": "ok",           "redis": "unreachable" }
 ```
 
-Verifies PostgreSQL connectivity by executing a trivial query (`SELECT 1`).
+Verifies both PostgreSQL connectivity (`SELECT 1`) and Redis reachability (`PING`). Returns 503 if either dependency is unavailable. Session is injected via `Depends(get_async_session)` to allow override in tests.

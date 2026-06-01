@@ -219,3 +219,6 @@ __marimo__/
 
 # Claude Code
 .claude/
+
+# Internal study material
+interview_prep.md

@@ -43,7 +43,7 @@ This spec covers the foundation of the Agrobot system: project structure, stack 
 - The system shall store one weather forecast record per `(zone, date, event_type)` combination enforced by a unique constraint.
 - The system shall reject any `probability` value outside the range [0.0, 1.0] at the database level.
 - WHEN the ingestion job upserts a record that already exists, the system shall update `probability` and `updated_at` without creating a duplicate.
-- The system shall index `(zone, date)` to support efficient range lookups by the alert evaluator.
+- The system shall index `(zone, event_type, date)` to support efficient range lookups by the alert evaluator (column order matches query filter pattern: zone → event_type → date range).
 
 ---
 
@@ -77,6 +77,7 @@ This spec covers the foundation of the Agrobot system: project structure, stack 
 **US-6.1** — As an operator, I want a health check endpoint and structured logging so I can verify the system state in any environment.
 
 **Acceptance Criteria:**
-- The system shall expose a `GET /health` endpoint that returns status 200 when the API and database connection are healthy.
-- The system shall emit structured logs (JSON) in production and human-readable logs in development.
-- All log entries shall include timestamp, level, service name, and a message.
+- The system shall expose a `GET /health` endpoint that returns status 200 when both the database and Redis are reachable; it shall return 503 if either dependency is unavailable.
+- The system shall emit human-readable logs (timestamp, level, logger name, message) via Python stdlib logging.
+- The system shall suppress noisy third-party loggers (httpx, asyncpg, sqlalchemy.engine) to WARNING level.
+- Health check requests (`/health`) shall be filtered from access logs to avoid noise.
