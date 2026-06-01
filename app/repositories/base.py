@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 @runtime_checkable
 class HasId(Protocol):
     """Structural interface — any model with an `id: UUID` field satisfies this."""
+
     id: UUID
 
 

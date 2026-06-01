@@ -20,7 +20,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync
 
       - name: Ruff check
         run: uv run ruff check .
@@ -41,7 +41,13 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync
 
       - name: Run tests
         run: uv run pytest tests/ -v
+        env:
+          # pydantic-settings requires these at import time — testcontainers overrides
+          # DATABASE_URL at runtime so the value here is never actually used for DB access
+          DATABASE_URL: postgresql+asyncpg://ci:ci@localhost:5432/ci
+          CELERY_BROKER_URL: redis://localhost:6379/0
+          CELERY_RESULT_BACKEND: redis://localhost:6379/1
