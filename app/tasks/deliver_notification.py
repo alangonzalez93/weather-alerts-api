@@ -37,7 +37,7 @@ def deliver_notification(self, notification_id: str) -> None:
         except Exception as exc:
             # Exponential backoff with jitter: ~60s, ~120s, ~240s.
             # Jitter prevents thundering herds when many notifications fail simultaneously.
-            delay = 60 * (2 ** self.request.retries) + random.uniform(0, 30)
+            delay = 60 * (2**self.request.retries) + random.uniform(0, 30)
             try:
                 raise self.retry(exc=exc, countdown=delay)
             except MaxRetriesExceededError:

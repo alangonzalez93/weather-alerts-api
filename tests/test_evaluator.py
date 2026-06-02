@@ -3,6 +3,7 @@
 These tests exercise _evaluate_alert and evaluate_alerts directly using mocks —
 no DB or Redis needed.
 """
+
 import uuid
 from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
@@ -116,9 +117,10 @@ def test_continues_processing_remaining_alerts_on_error():
 
 
 def test_evaluate_alerts_skips_when_lock_held():
-    with patch("app.tasks.evaluate_alerts.redis_client") as mock_redis, \
-         patch("app.tasks.evaluate_alerts._run_evaluation") as mock_run:
-
+    with (
+        patch("app.tasks.evaluate_alerts.redis_client") as mock_redis,
+        patch("app.tasks.evaluate_alerts._run_evaluation") as mock_run,
+    ):
         mock_redis.set.return_value = None  # lock not acquired
 
         evaluate_alerts()
@@ -127,9 +129,10 @@ def test_evaluate_alerts_skips_when_lock_held():
 
 
 def test_evaluate_alerts_acquires_and_releases_lock():
-    with patch("app.tasks.evaluate_alerts.redis_client") as mock_redis, \
-         patch("app.tasks.evaluate_alerts._run_evaluation"):
-
+    with (
+        patch("app.tasks.evaluate_alerts.redis_client") as mock_redis,
+        patch("app.tasks.evaluate_alerts._run_evaluation"),
+    ):
         mock_redis.set.return_value = True
 
         evaluate_alerts()
@@ -142,9 +145,10 @@ def test_evaluate_alerts_acquires_and_releases_lock():
 
 def test_forecast_cache_prevents_redundant_queries():
     """N alerts sharing same (zone, event_type) trigger only 1 forecast query."""
-    with patch("app.tasks.evaluate_alerts.redis_client") as mock_redis, \
-         patch("app.tasks.evaluate_alerts.get_sync_session") as mock_ctx:
-
+    with (
+        patch("app.tasks.evaluate_alerts.redis_client") as mock_redis,
+        patch("app.tasks.evaluate_alerts.get_sync_session") as mock_ctx,
+    ):
         mock_redis.set.return_value = True
 
         session = MagicMock()
@@ -168,7 +172,6 @@ def test_forecast_cache_prevents_redundant_queries():
             patch(f"{task}.WeatherForecastSyncRepository", return_value=forecast_repo),
             patch(f"{task}.NotificationSyncRepository", return_value=notification_repo),
         ):
-
             evaluate_alerts()
 
         # Only 1 forecast query for 3 alerts sharing the same zone/event_type

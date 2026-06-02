@@ -108,9 +108,7 @@ async def test_list_alerts_filtered_by_field_id(client):
 async def test_list_alerts_filtered_by_is_active(client):
     field_id = str(uuid.uuid4())
     alert = await _create_alert(client, {"field_id": field_id})
-    await client.patch(
-        f"/api/v1/alerts/{alert['id']}", json={"is_active": False}
-    )
+    await client.patch(f"/api/v1/alerts/{alert['id']}", json={"is_active": False})
 
     resp = await client.get(f"/api/v1/alerts/?field_id={field_id}&is_active=true")
     assert resp.status_code == 200

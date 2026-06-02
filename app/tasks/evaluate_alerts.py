@@ -116,9 +116,7 @@ def _run_evaluation() -> None:
 def _evaluate_alert(alert, forecasts, notification_repo, date_from, date_to) -> None:
     # One query fetches the latest notification for every date in the lookahead window.
     # Avoids up to 7 per-date queries per alert — result consumed from memory below.
-    latest_by_date = notification_repo.get_latest_by_dates_for_alert(
-        alert.id, date_from, date_to
-    )
+    latest_by_date = notification_repo.get_latest_by_dates_for_alert(alert.id, date_from, date_to)
 
     for forecast in forecasts:
         if forecast.probability < alert.threshold:

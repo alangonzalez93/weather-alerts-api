@@ -26,9 +26,6 @@ class AlertSyncRepository(SyncBaseRepository[Alert]):
             where_clauses.append(Alert.id > after_id)
 
         result = self.session.execute(
-            select(Alert)
-            .where(*where_clauses)
-            .order_by(Alert.id.asc())
-            .limit(limit)
+            select(Alert).where(*where_clauses).order_by(Alert.id.asc()).limit(limit)
         )
         return list(result.scalars().all())

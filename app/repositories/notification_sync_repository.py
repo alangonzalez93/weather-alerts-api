@@ -54,10 +54,7 @@ class NotificationSyncRepository(SyncBaseRepository[Notification]):
             where_clauses.append(Notification.id > after_id)
 
         result = self.session.execute(
-            select(Notification)
-            .where(*where_clauses)
-            .order_by(Notification.id.asc())
-            .limit(limit)
+            select(Notification).where(*where_clauses).order_by(Notification.id.asc()).limit(limit)
         )
         return list(result.scalars().all())
 

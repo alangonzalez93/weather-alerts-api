@@ -70,9 +70,7 @@ async def test_list_notifications_pagination(client, db_session):
     for i in range(5):
         await _add_notification(db_session, alert["id"], days_offset=i)
 
-    resp = await client.get(
-        f"/api/v1/alerts/{alert['id']}/notifications?limit=2&offset=0"
-    )
+    resp = await client.get(f"/api/v1/alerts/{alert['id']}/notifications?limit=2&offset=0")
     assert resp.status_code == 200
     body = resp.json()
     assert body["total"] == 5
@@ -80,9 +78,7 @@ async def test_list_notifications_pagination(client, db_session):
     assert body["offset"] == 0
     assert len(body["items"]) == 2
 
-    resp2 = await client.get(
-        f"/api/v1/alerts/{alert['id']}/notifications?limit=2&offset=2"
-    )
+    resp2 = await client.get(f"/api/v1/alerts/{alert['id']}/notifications?limit=2&offset=2")
     body2 = resp2.json()
     ids_page1 = {n["id"] for n in body["items"]}
     ids_page2 = {n["id"] for n in body2["items"]}
