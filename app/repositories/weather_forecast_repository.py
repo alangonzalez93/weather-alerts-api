@@ -27,6 +27,7 @@ class WeatherForecastRepository(BaseRepository[WeatherForecast]):
                 WeatherForecast.event_type == event_type,
                 WeatherForecast.date >= date_from,
                 WeatherForecast.date <= date_to,
+                WeatherForecast.deleted == False,  # noqa: E712
             )
             .order_by(WeatherForecast.date)
         )

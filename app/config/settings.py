@@ -11,10 +11,16 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str
-    # Pool sizing: tune per-environment to stay within postgres max_connections.
-    # Total connections = (pool_size + max_overflow) x number_of_processes.
+    # API pool — handles concurrent async requests.
+    # Total API connections = (db_pool_size + db_max_overflow) x api_processes.
     db_pool_size: int = 10
     db_max_overflow: int = 20
+    # Worker pool — each worker processes one task at a time (prefetch=1),
+    # so it needs at most 1 active connection. A small pool avoids holding
+    # idle connections that eat into Postgres max_connections for nothing.
+    # Total worker connections = (db_worker_pool_size + db_worker_max_overflow) x num_workers.
+    db_worker_pool_size: int = 2
+    db_worker_max_overflow: int = 3
     # Recycle connections idle > 1h to avoid stale sockets after DB restarts
     db_pool_recycle: int = 3600
 
@@ -26,6 +32,10 @@ class Settings(BaseSettings):
     alert_eval_interval_seconds: int = 3600
     alert_lookahead_days: int = 7
     alert_renotify_delta: float = 0.10
+    alert_eval_batch_size: int = 500
+
+    # Redis (used for distributed lock in evaluate_alerts)
+    redis_url: str = "redis://redis:6379/0"
 
     # App
     env: str = "development"

@@ -65,6 +65,7 @@ weather-alerts-api/
 │   │   └── exceptions.py       # Global unhandled exception handler
 │   ├── models/
 │   │   ├── __init__.py         # Re-exports enums + imports all model classes for Alembic
+│   │   ├── base_model.py       # AuditMixin — shared columns for all ORM models
 │   │   ├── enums.py            # WeatherEventType, NotificationStatus (StrEnum)
 │   │   └── weather_forecast.py
 │   ├── repositories/
@@ -88,29 +89,57 @@ weather-alerts-api/
     └── conftest.py
 ```
 
+## AuditMixin — Shared Base for All ORM Models
+
+Every table in the system inherits from `AuditMixin`, defined in `app/models/base_model.py`. This guarantees a consistent schema across all entities and enables generic soft-delete behavior in the repository layer.
+
+```python
+class AuditMixin:
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=func.gen_random_uuid())
+    deleted: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+```
+
+Models inherit like:
+```python
+class WeatherForecast(AuditMixin, Base):
+    __tablename__ = "weather_forecasts"
+    # only domain-specific columns here
+    zone: Mapped[str] = ...
+    date: Mapped[date] = ...
+    ...
+```
+
+---
+
 ## Repository Pattern
 
 Two base classes — one async for FastAPI, one sync for Celery workers. Concrete repositories inherit from the appropriate base.
 
-Both base classes constrain `T` via a `HasId` Protocol — any model passed must declare `id: UUID`. This lets the type checker verify `self._model.id` is valid without requiring model inheritance.
+Both base classes constrain `T` via an `AuditFields` Protocol — any model passed must implement all fields from `AuditMixin`. This lets the type checker verify field access without requiring explicit inheritance checks.
 
 ```python
-class HasId(Protocol):
+class AuditFields(Protocol):
     id: UUID
+    deleted: bool
+    updated_at: datetime
 
-class BaseRepository[T: HasId]:
+class BaseRepository[T: AuditFields]:
     def __init__(self, model: type[T], session: AsyncSession) -> None: ...
 
+    # get_by_id and all list queries automatically filter deleted=False
     async def get_by_id(self, id: UUID) -> T | None: ...
     async def create(self, instance: T) -> T: ...
     async def update(self, instance: T) -> T: ...
+    # delete sets deleted=True and updated_at=now() — never physically removes the row
     async def delete(self, instance: T) -> None: ...
 ```
 
-### `SyncBaseRepository[T: HasId]` — sync (Celery workers)
+### `SyncBaseRepository[T: AuditFields]` — sync (Celery workers)
 
 ```python
-class SyncBaseRepository[T: HasId]:
+class SyncBaseRepository[T: AuditFields]:
     def __init__(self, model: type[T], session: Session) -> None: ...
 
     def get_by_id(self, id: UUID) -> T | None: ...
@@ -200,6 +229,7 @@ CELERY_RESULT_BACKEND=redis://redis:6379/1
 ALERT_EVAL_INTERVAL_SECONDS=3600
 ALERT_LOOKAHEAD_DAYS=7
 ALERT_RENOTIFY_DELTA=0.10
+ALERT_EVAL_BATCH_SIZE=500
 
 # App
 ENV=development   # development | production
@@ -228,15 +258,18 @@ flood        → Flood
 
 ### Table
 
-| Column        | Type         | Constraints                       |
-|---------------|--------------|-----------------------------------|
-| `id`          | UUID         | PK, default gen_random_uuid()     |
-| `zone`        | VARCHAR(100) | NOT NULL                          |
-| `date`        | DATE         | NOT NULL                          |
-| `event_type`  | VARCHAR(50)  | NOT NULL                          |
-| `probability` | FLOAT        | NOT NULL, CHECK (0.0 <= x <= 1.0) |
-| `updated_at`  | TIMESTAMPTZ  | NOT NULL                          |
-| `created_at`  | TIMESTAMPTZ  | NOT NULL, default now()           |
+Columns from `AuditMixin` are shared across all tables and not repeated per-model in subsequent specs.
+
+| Column        | Type         | Source       | Constraints                       |
+|---------------|--------------|--------------|-----------------------------------|
+| `id`          | UUID         | AuditMixin   | PK, default gen_random_uuid()     |
+| `deleted`     | BOOLEAN      | AuditMixin   | NOT NULL, default false           |
+| `created_at`  | TIMESTAMPTZ  | AuditMixin   | NOT NULL, default now()           |
+| `updated_at`  | TIMESTAMPTZ  | AuditMixin   | NOT NULL, default now()           |
+| `zone`        | VARCHAR(100) | domain       | NOT NULL                          |
+| `date`        | DATE         | domain       | NOT NULL                          |
+| `event_type`  | VARCHAR(50)  | domain       | NOT NULL                          |
+| `probability` | FLOAT        | domain       | NOT NULL, CHECK (0.0 <= x <= 1.0) |
 
 **Constraints:**
 - UNIQUE `(zone, date, event_type)`

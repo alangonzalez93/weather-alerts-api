@@ -1,10 +1,9 @@
-import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.core.database import get_async_session
+from app.core.redis_client import async_redis_client
 from app.schemas.health import HealthResponse
 
 router = APIRouter(tags=["health"])
@@ -38,9 +37,7 @@ async def _check_database(session: AsyncSession) -> bool:
 
 async def _check_redis() -> bool:
     try:
-        client = aioredis.from_url(settings.celery_broker_url)
-        await client.ping()
-        await client.aclose()
+        await async_redis_client.ping()
         return True
     except Exception:
         return False

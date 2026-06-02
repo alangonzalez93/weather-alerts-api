@@ -1,3 +1,4 @@
+import datetime
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
@@ -7,16 +8,20 @@ from sqlalchemy.orm import Session
 
 
 @runtime_checkable
-class HasId(Protocol):
-    """Structural interface — any model with an `id: UUID` field satisfies this."""
+class AuditFields(Protocol):
+    """Structural interface — any model with AuditMixin columns satisfies this."""
 
     id: UUID
+    deleted: bool
+    updated_at: datetime.datetime
 
 
-class BaseRepository[T: HasId]:
+class BaseRepository[T: AuditFields]:
     """Generic async repository for FastAPI.
 
     Subclasses call super().__init__(ModelClass, session).
+    All queries automatically filter deleted=False — concrete repositories
+    never need to add this filter explicitly.
     """
 
     def __init__(self, model: type[T], session: AsyncSession) -> None:
@@ -24,7 +29,12 @@ class BaseRepository[T: HasId]:
         self.session = session
 
     async def get_by_id(self, id: UUID) -> T | None:
-        result = await self.session.execute(select(self._model).where(self._model.id == id))
+        result = await self.session.execute(
+            select(self._model).where(
+                self._model.id == id,
+                self._model.deleted == False,  # noqa: E712
+            )
+        )
         return result.scalar_one_or_none()
 
     async def create(self, instance: T) -> T:
@@ -41,14 +51,16 @@ class BaseRepository[T: HasId]:
         return instance
 
     async def delete(self, instance: T) -> None:
-        await self.session.delete(instance)
+        instance.deleted = True
+        instance.updated_at = datetime.datetime.now(datetime.UTC)
         await self.session.flush()
 
 
-class SyncBaseRepository[T: HasId]:
+class SyncBaseRepository[T: AuditFields]:
     """Generic sync repository for Celery workers.
 
     Subclasses call super().__init__(ModelClass, session).
+    All queries automatically filter deleted=False.
     """
 
     def __init__(self, model: type[T], session: Session) -> None:
@@ -56,7 +68,12 @@ class SyncBaseRepository[T: HasId]:
         self.session = session
 
     def get_by_id(self, id: UUID) -> T | None:
-        result = self.session.execute(select(self._model).where(self._model.id == id))
+        result = self.session.execute(
+            select(self._model).where(
+                self._model.id == id,
+                self._model.deleted == False,  # noqa: E712
+            )
+        )
         return result.scalar_one_or_none()
 
     def create(self, instance: T) -> T:
@@ -71,5 +88,6 @@ class SyncBaseRepository[T: HasId]:
         return instance
 
     def delete(self, instance: T) -> None:
-        self.session.delete(instance)
+        instance.deleted = True
+        instance.updated_at = datetime.datetime.now(datetime.UTC)
         self.session.flush()

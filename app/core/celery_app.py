@@ -6,7 +6,10 @@ celery_app = Celery(
     "weather_alerts",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["app.tasks"],
+    include=[
+        "app.tasks.evaluate_alerts",
+        "app.tasks.deliver_notification",
+    ],
 )
 
 celery_app.conf.update(
@@ -24,6 +27,10 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
     # prefetch=1 prevents a slow task from blocking other slots on the same worker
     worker_prefetch_multiplier=1,
-    # Populated at runtime when the alerts module registers its periodic tasks
-    beat_schedule={},
+    beat_schedule={
+        "evaluate-alerts": {
+            "task": "evaluate_alerts",
+            "schedule": settings.alert_eval_interval_seconds,
+        }
+    },
 )
