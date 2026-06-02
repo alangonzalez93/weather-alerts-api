@@ -3,6 +3,7 @@
 Usage:
     uv run python -m app.scripts.seed_weather
 """
+
 import random
 from datetime import UTC, date, datetime, timedelta
 

@@ -53,6 +53,7 @@ async def client(db_session):
 
     FastAPI's DI is bypassed so every request shares the same rolled-back transaction.
     """
+
     async def _override():
         yield db_session
 
