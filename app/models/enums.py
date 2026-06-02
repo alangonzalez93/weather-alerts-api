@@ -19,3 +19,8 @@ class NotificationStatus(enum.StrEnum):
     pending = "pending"
     sent = "sent"
     failed = "failed"
+
+
+class NotificationChannel(enum.StrEnum):
+    whatsapp = "whatsapp"
+    email = "email"

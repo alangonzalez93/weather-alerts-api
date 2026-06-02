@@ -9,8 +9,8 @@ from app.config import settings
 sync_engine = create_engine(
     settings.database_url_sync,
     pool_pre_ping=True,
-    pool_size=settings.db_pool_size,
-    max_overflow=settings.db_max_overflow,
+    pool_size=settings.db_worker_pool_size,
+    max_overflow=settings.db_worker_max_overflow,
     pool_recycle=settings.db_pool_recycle,
 )
 

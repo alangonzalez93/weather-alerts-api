@@ -200,10 +200,9 @@ Response → 200 PaginatedResponse[NotificationResponse] (ordered by triggered_a
 ## Pydantic Schemas
 
 ```python
-T = TypeVar("T")
-
 # PaginatedResponse — generic envelope for all paginated list endpoints
-class PaginatedResponse(BaseModel, Generic[T]):
+# Python 3.12 type parameter syntax (PEP 695) — no TypeVar or Generic import needed
+class PaginatedResponse[T](BaseModel):
     items: list[T]
     total: int
     limit: int
@@ -470,18 +469,41 @@ def deliver_notification(self, notification_id: str) -> None:
                 )
 
 
-def _deliver(notification, alert) -> None:
-    # Logs the notification — replace with real channel dispatch when integrating
-    logger.info(
-        "[NOTIFICATION] dispatched",
-        extra={
-            "channel": alert.notification_channel,
-            "contact": alert.contact,
-            "alert_id": str(notification.alert_id),
-            "target_date": str(notification.target_date),
-            "probability": notification.probability,
-        },
+def _build_message(notification, alert) -> str:
+    pct = round(notification.probability * 100)
+    event = alert.event_type.replace("_", " ")
+    return (
+        f"Weather alert for zone '{alert.zone}': {event} forecast on {notification.target_date} "
+        f"with {pct}% probability — exceeds your configured threshold of "
+        f"{round(alert.threshold * 100)}%. Take the necessary precautions."
     )
+
+
+def _deliver(notification, alert) -> None:
+    # Logs the notification — replace with real channel dispatch when integrating.
+    # Message is built once and included both in the human-readable log string
+    # and in the structured extra dict for log aggregation.
+    message = _build_message(notification, alert)
+    channel = alert.notification_channel
+
+    if channel == "whatsapp":
+        logger.info(
+            "[DELIVERY] WhatsApp → %s | alert=%s | %s",
+            alert.contact, notification.alert_id, message,
+            extra={"channel": channel, "contact": alert.contact,
+                   "alert_id": str(notification.alert_id),
+                   "target_date": str(notification.target_date),
+                   "probability": notification.probability},
+        )
+    elif channel == "email":
+        logger.info(
+            "[DELIVERY] Email → %s | alert=%s | %s",
+            alert.contact, notification.alert_id, message,
+            extra={"channel": channel, "contact": alert.contact,
+                   "alert_id": str(notification.alert_id),
+                   "target_date": str(notification.target_date),
+                   "probability": notification.probability},
+        )
 ```
 
 ### Celery Beat Schedule
@@ -507,6 +529,6 @@ celery_app.conf.beat_schedule = {
 - **Self-healing**: if the worker crashed between DB commit and Redis enqueue in a previous run, those notifications remain `pending`. The next run of `evaluate_alerts` picks them up in the Phase 2 query and re-enqueues them automatically.
 - **Idempotency in delivery**: `deliver_notification` checks `status == pending` before delivering — if the same notification is enqueued twice, the second execution is a no-op.
 - **Idempotency in evaluation**: re-running `evaluate_alerts` never creates duplicate notifications — the `get_latest_by_dates_for_alert` check guarantees this.
-- **Connection pool**: both the FastAPI and worker processes share the same Postgres instance. Pool sizes are configured in `Settings` (`DB_POOL_SIZE`, `DB_MAX_OVERFLOW`).
+- **Separate pool sizing for API vs workers**: the API and Celery workers have different connection needs. The API handles concurrent async requests — a larger pool makes sense. Each Celery worker processes one task at a time (`prefetch=1`) and holds at most one connection per task. Giving workers the same `pool_size=10` as the API wastes 9 idle connections per worker. Settings provide separate values: `DB_POOL_SIZE/DB_MAX_OVERFLOW` for the async engine (API), `DB_WORKER_POOL_SIZE/DB_WORKER_MAX_OVERFLOW` for the sync engine (workers). Formula to stay within Postgres `max_connections`: `(DB_POOL_SIZE + DB_MAX_OVERFLOW) × api_processes + (DB_WORKER_POOL_SIZE + DB_WORKER_MAX_OVERFLOW) × num_workers ≤ max_connections - superuser_reserved`. With defaults (10+20)×1 + (2+3)×8 = 70 — within the Postgres default of 100.
 - **Table growth — `notifications`**: at 100k active alerts × 7-day lookahead × daily evaluation cycles the table grows by ~700k rows/week. Recommended mitigation: PostgreSQL range partitioning by `triggered_at` (monthly partitions) + a periodic archiving job that moves records older than 90 days with `status IN ('sent', 'failed')` to a cold-storage partition.
 - **Structured logging**: all evaluator and delivery log entries MUST use `logger.info/exception(..., extra={...})` with a consistent set of keys (`alert_id`, `notification_id`, `enqueued`, `channel`, etc.) so log aggregation (Datadog, CloudWatch, etc.) can build metrics without parsing free-form strings.

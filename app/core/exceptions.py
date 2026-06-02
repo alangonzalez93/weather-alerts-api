@@ -15,11 +15,13 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     """
     error_id = str(uuid.uuid4())
     logger.error(
-        "[ERROR][UNHANDLED] error_id=%s method=%s path=%s",
-        error_id,
-        request.method,
-        request.url.path,
+        "[ERROR][UNHANDLED] request failed",
         exc_info=exc,
+        extra={
+            "error_id": error_id,
+            "method": request.method,
+            "path": request.url.path,
+        },
     )
     return JSONResponse(
         status_code=500,
